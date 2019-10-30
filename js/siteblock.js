@@ -15,11 +15,11 @@ csapuntz.siteblock = (function () {
        }
 
        if ("settings" in stg) {
-         opts = JSON.parse(stg['settings']);
+         opts = JSON.parse(stg.settings);
        }
 
        if ("siteblock_list" in stg) {
-         opts['rules'] = stg['siteblock_list'];
+         opts.rules = stg.siteblock_list;
        }
 
        if (! ("rules" in opts)) 
@@ -39,9 +39,9 @@ csapuntz.siteblock = (function () {
           stg = localStorage;
        } 
 
-       stg['settings'] = JSON.stringify(opts);
+       stg.settings = JSON.stringify(opts);
        if ("siteblock_list" in stg)
-           delete stg["siteblock_list"];
+           delete stg.siteblock_list;
     },
 
     newUsageTracker : function() {
@@ -54,46 +54,63 @@ csapuntz.siteblock = (function () {
        var time_allowed = 0;
        var time_period = 3600;
 
-       var time_used = 0;
+       var last_used_day = (new Date()).getDay();
+       var time_used_today = 0;
 
+       var queue = [];
        var last_start = -1;
-       var last_end = -1;
        
-       var check_reset = function (now) {
-           if (last_end != -1 &&
-               (now - last_end) >= (time_period - time_allowed)) {
-              time_used = 0;
-           }
-       }
-
-       var get_time_used = function() {
-             var time = time_cb();
-
-             check_reset(time);
-
-             // If we're in an existing interval, count it
-             var time_adj = 0;
-             if (last_start != -1)
-                time_adj = (time - last_start);
-
-             return (time_used + time_adj);
+       var clear_queue = function (now) {
+         while( ( queue.length > 0 ) && ( queue[0].end < now - time_period ) )
+            queue.shift();
        };
 
-       var self = {
+       var get_time_used = function() {
+             let now = time_cb();
+             clear_queue(now);
+
+             let prior_time_used = 0;
+             for( const interval of queue ){
+               if( interval.end - interval.length < now - time_period )
+                  prior_time_used += interval.end - (now - time_period);
+               else
+                  prior_time_used += interval.length;
+             }
+
+             // If we're in an existing interval, count it
+             const curr_usage = (last_start !== -1) ? (now - last_start) : 0;
+
+             return (prior_time_used + curr_usage);
+       };
+
+       var add_to_daily_usage = function(time_used) {
+            let today = (new Date()).getDay();
+            if (today !== last_used_day) {
+               last_used_day = today;
+               time_used_today = time_used;
+            } else {
+               time_used_today += time_used;
+            }
+       };
+
+       var formatTime = function(seconds) {
+          return (new Date(seconds * 1000).toISOString().substr(11, 8));
+       };
+
+       return {
           start: function() {
              last_start = time_cb();
-             check_reset(last_start);
+             clear_queue(last_start);
 
              return function() {
-                var end = time_cb();
-                if (end > last_start)
-                    time_used += (end - last_start);
-
-                last_start = -1;
-                last_end = end;
+               const now = time_cb();
+               const time_used = now-last_start;
+               if( time_used > 3 )  //To avoid negligible fragments
+                  queue.push({length: time_used, end: now});
+               add_to_daily_usage(time_used);
+               last_start = -1;
              };
           },
-
          
           allowed: function() {
              return get_time_used() < time_allowed; 
@@ -110,19 +127,57 @@ csapuntz.siteblock = (function () {
 
           getState : function() {
             return {
+              "last_used_day" : last_used_day,
+              "time_used_today" : time_used_today,
               "time_used" : get_time_used(),
-              "last_end" : ((last_start != -1) ? time_cb() : last_end),
+              "queue" : queue,
+              "last_start" : last_start
             };
           },
 
           setState : function(st) {
-             time_used = st.time_used;
+             last_used_day = st.last_used_day;
+             time_used_today = st.time_used_today;
              last_start = -1;
-             last_end = st.last_end;
+             
+             if( typeof st.queue === 'undefined' ){
+               queue = [];
+             } else {
+               queue = JSON.parse(JSON.stringify(st.queue));  //Deep copying, maybe unnecessary?!
+             }
           },
-       };
 
-       return self;
+          till : function() {
+            let x = -1;
+            let intervalSum = 0;
+            for( const interval of queue ){
+               intervalSum += interval.length;
+               if( intervalSum >= 60 ){
+                  x = interval.end;
+                  break;
+               }
+            }
+            if( x === -1 && intervalSum !== 0 )
+               x = queue[queue.length-1].end;
+            
+            //To handle a race condition where a new interval is just about to be pushed onto the queue
+            if( x === -1 && last_start !== -1 ){
+               x = time_cb();
+            }
+            
+            if( x === -1 )
+               return "Already available";
+            else {
+               const tzOffset = (new Date()).getTimezoneOffset()*60;
+               return formatTime(x + time_period - tzOffset);
+            }
+          },
+
+          time_used_today : function() {
+             const curr_usage = (last_start !== -1) ? (time_cb() - last_start) : 0;
+             return formatTime(time_used_today + curr_usage);
+          }
+       };
     },
 
     newSiteBlock : function() {
@@ -139,7 +194,7 @@ csapuntz.siteblock = (function () {
          var t = [];
 
          for (var v in tabState) {
-            if (v.substring(0, 3) == "Tab")
+            if (v.substring(0, 3) === "Tab")
                t.push(Number(v.substring(3)));
          }
 
@@ -166,15 +221,15 @@ csapuntz.siteblock = (function () {
               return;
 
             paths = paths.split("\n");
-            path_white = new Array();
-            path_black = new Array();
+            path_white = [];
+            path_black = [];
 
             for (var i = 0 ; i < paths.length; ++i) {
                 var p = paths[i];
                 if (p.match(/^\s*$/)) {
                 } else {
                    var add = path_black;	    
-                   if (p[0] == '+') {
+                   if (p[0] === '+') {
                       p = p.substr(1);
                       add = path_white;
                    }
@@ -191,13 +246,13 @@ csapuntz.siteblock = (function () {
             if (url !== undefined && url.match(/https?:/)) {
                var p;
                for (p in path_black) {
-                     if (url.search(path_black[p]) != -1) {
+                     if (url.search(path_black[p]) !== -1) {
                          blocked = true;
                          break;
                      }
                }
                for (p in path_white) {
-                     if (url.search(path_white[p]) != -1) {
+                     if (url.search(path_white[p]) !== -1) {
                          blocked = false;
                          break;
                      }
@@ -245,11 +300,33 @@ csapuntz.siteblock = (function () {
             if (url === null) {
                 delete_tab_info(tabid);
             } else {
-                ti['url'] = url;
-                ti['blocked'] = blocked;
+                ti.url = url;
+                ti.blocked = blocked;
             }
 
             return blocked && !allowed;
+         },
+
+         deref : function(tabid) {
+            var ti = get_tab_info(tabid);
+            if (ti.blocked) {
+               ref = ref - 1;
+               if (ref === 0) {
+                  endfunc();
+                  endfunc = function() {};
+               }
+            }
+         },
+
+         reRefIfNeeded : function(tabid) {
+            var ti = get_tab_info(tabid);
+            if (ti.blocked) {
+               ref = ref + 1;
+               if (ref === 1) {
+                  // Start the clock running
+                  endfunc = ut.start();
+               } 
+            }
          },
 
          getBlockedTabs : function() {
@@ -267,6 +344,14 @@ csapuntz.siteblock = (function () {
                     ret.push( { id : tabs[i], url : ti.url } );
             }
             return ret;
+         },
+
+         till : function() {
+            return ut.till();
+         },
+
+         time_used_today : function() {
+            return ut.time_used_today();
          }
        }; // self =
 

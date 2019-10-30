@@ -16,7 +16,7 @@ function newTracker() {
 }
 
 function assertArrayEqual(a, b, msg) {
-    if (a.length != b.length) {
+    if (a.length !== b.length) {
        Assert.fail( msg );
        return;
     }
@@ -110,7 +110,7 @@ YAHOO.csapuntz.TestCase = new YAHOO.tool.TestCase({
      var time = 100;
 
      sb.updatePaths("google.com");
-     // 15 minutes a day allowed
+     // 1 minute every 10 minutes allowed
      sb.setAllowedUsage(1, 10);
      sb.setTimeCallback(function() {
              return time;
@@ -141,9 +141,39 @@ YAHOO.csapuntz.TestCase = new YAHOO.tool.TestCase({
 
      Assert.areEqual(sb.blockThisTabChange(2, "http://www.apple.com"), false, "ok2");
 
-     time += 600;
+     time += 601;
      Assert.areEqual(sb.blockThisTabChange(2, "http://www.google.com"), false, "mon4");
    },
+   
+   testTimer2: function() {
+      var sb = csapuntz.siteblock.newSiteBlock();
+ 
+      var time = 0;
+ 
+      sb.updatePaths("google.com");
+      // 5 minutes per hour allowed
+      sb.setAllowedUsage(5, 60);
+      sb.setTimeCallback(function() {
+              return time;
+         });
+ 
+      Assert.areEqual(sb.blockThisTabChange(1, "http://www.google.com"), false, "mon1");
+      time += 4 * 60;
+      Assert.areEqual(sb.blockThisTabChange(1, "http://www.apple.com"), false, "mon2");
+      time += 54 * 60;
+      Assert.areEqual(sb.blockThisTabChange(1, "http://www.google.com"), false, "mon3");
+      time += 1 * 60;
+      Assert.areEqual(sb.blockThisTabChange(1, "http://www.google.com"), true, "mon4");
+      Assert.areEqual(sb.blockThisTabChange(1, "http://www.apple.com"), false, "mon5");
+      time += 1 * 60;
+      //1Hr has passed so far
+      time += 10 * 60;
+      Assert.areEqual(sb.blockThisTabChange(1, "http://www.google.com"), false, "mon6");
+      time += 3.9 * 60;
+      Assert.areEqual(sb.blockThisTabChange(1, "http://www.google.com"), false, "mon7");
+      time += 0.2 * 60;
+      Assert.areEqual(sb.blockThisTabChange(1, "http://www.google.com"), true, "mon8");
+    },
 });
 
 YAHOO.util.Event.onDOMReady(function (){
