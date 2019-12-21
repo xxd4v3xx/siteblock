@@ -9,9 +9,16 @@ if ("state" in localStorage) {
 
 function block(id, tab_url)
 {
-   chrome.tabs.update(id, 
-           { "url" : chrome.extension.getURL("../html/blocked.html") + "?url=" + escape(tab_url) + 
-             "&till=" + sb.till() + "&todays_total=" + sb.time_used_today() });
+  chrome.tabs.goBack(id, () => {
+    if(chrome.runtime.lastError) {  //To suppress a potential error
+      //The blocked tab must've been opened "in a new tab" from a whitelistd tab
+      //No need to do anything special.
+    }
+    setTimeout( () =>
+      chrome.tabs.update(id, 
+              { "url" : chrome.extension.getURL("../html/blocked.html") + "?url=" + escape(tab_url) + 
+                "&till=" + sb.till() + "&todays_total=" + sb.time_used_today() }), 500);
+  });
 }
 
 function processTab(tab) 
@@ -35,8 +42,11 @@ function processTab2(tab)
 
 chrome.tabs.onUpdated.addListener(
         function(tabid, changeinfo, tab) {
-           processTab(tab);
-           updateBadge();
+           if( "url" in changeinfo &&   //To avoid getting bugged with all the updates a tab can receive from the time it's requested till it's fully loaded
+                tab.active ) {
+            processTab(tab);
+            updateBadge();
+           }
         });
 
 chrome.tabs.onRemoved.addListener(
@@ -73,6 +83,7 @@ function onWindows(arrayWin) {
 
 function onOptionsChanged(opts) {
     sb.updatePaths(opts.rules);
+    sb.setSmartBlock(opts.smart_block, opts.api_key);
     sb.setAllowedUsage(opts.allowed, opts.period);
 }
 

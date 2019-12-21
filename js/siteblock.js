@@ -31,6 +31,9 @@ csapuntz.siteblock = (function () {
        if (! ("period" in opts))
           opts.period = 1440;
 
+       if (! ("smart_block" in opts))
+          opts.smart_block = false;
+
        return opts;
     },
 
@@ -184,6 +187,10 @@ csapuntz.siteblock = (function () {
       var path_white;
       var path_black;
 
+      var smart_block;
+      var youtube_api_key;
+      var youtube_cache = {};
+
       var tabState = {};
       var ref = 0;
 
@@ -240,8 +247,41 @@ csapuntz.siteblock = (function () {
             }
          },
 
+         setSmartBlock : function(val, key) {
+            smart_block = val;
+            youtube_api_key = key;
+         },
+
          isBlocked : function(url) {
             var blocked = false;
+
+            //Alternatively, add "https://www.youtube.com/" permission to manifest.json
+            //document.querySelector("#more > yt-formatted-string").click()       to click on show more
+            //document.querySelector("#content > yt-formatted-string > a").innerText        would be the category
+            if (smart_block && url.match(/^https:\/\/www\.youtube\.com(?!\/playlist\?)/)) {
+               let videoID = url.match(/(?<=[\?&]v=)[\w-]+/);
+               if (videoID === null)
+                  return true;
+               else
+                  videoID = videoID[0];
+
+               let cachedVal = youtube_cache[videoID];
+               if ( cachedVal !== undefined )
+                  return cachedVal;
+
+               let xmlHttp = new XMLHttpRequest();
+               xmlHttp.open( "GET", `https://www.googleapis.com/youtube/v3/videos?part=snippet&key=${youtube_api_key}&id=${videoID}`, false );   // false for synchronous request
+               xmlHttp.setRequestHeader("Cache-Control","max-stale");
+               xmlHttp.send( null );
+               let resp = JSON.parse(xmlHttp.responseText);
+               console.log("Called API for: " + url);
+               let categoryId = resp.items[0].snippet.categoryId;
+               let blockable = !(categoryId === "26" /*Howto & Style*/ || 
+                                 categoryId === "27" /*Education*/ || 
+                                 categoryId === "28" /*Science & Technology*/);
+               youtube_cache[videoID] = blockable;
+               return blockable;
+            }
 
             if (url !== undefined && url.match(/https?:/)) {
                var p;
@@ -290,7 +330,7 @@ csapuntz.siteblock = (function () {
                   endfunc = ut.start();
                } 
             } else if (ti.blocked && !blocked) {
-               ref = ref - 1;
+               ref = Math.max( ref - 1, 0 );
                if (ref === 0) {
                   endfunc();
                   endfunc = function() {};
@@ -310,7 +350,7 @@ csapuntz.siteblock = (function () {
          deref : function(tabid) {
             var ti = get_tab_info(tabid);
             if (ti.blocked) {
-               ref = ref - 1;
+               ref = Math.max( ref - 1, 0 );
                if (ref === 0) {
                   endfunc();
                   endfunc = function() {};
